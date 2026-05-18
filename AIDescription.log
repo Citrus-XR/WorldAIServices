@@ -39,6 +39,7 @@
   - 疑似翻訳 `/mgr/api/simulate`
   - キャッシュ全削除 `/mgr/api/resetcache`
   - サービス説明取得 `/mgr/api/docs/ai`
+- `/mgr/api/simulate` は内部の `TranslationOutcome` をそのまま返さず、外側の `result` には翻訳文字列だけを入れる。cache/ai の由来と遅延は `source` / `latencyMs` として外側に出す
 
 保存方針
 - `service_config` に稼働設定を 1 行で保持する
@@ -77,6 +78,8 @@
 設定方針
 - runtime 変数は `wrangler.jsonc` に固定せず、Cloudflare Dashboard の Variables / Secrets を正本とする
 - `wrangler.jsonc` には Worker 固定設定、D1 binding、Durable Object binding / migration を残す
+- Cloudflare の Secret は Worker からは通常の環境変数と同じように `env` で読める。Dashboard 上で値が暗号化・非表示になること自体は正常動作で、API キー不正の原因ではない
+- `AI_PROVIDER_MODE=openai-chat` では OpenAI SDK の Chat Completions を使うため、`AI_API_URL` は SDK の `baseURL` として扱う。OpenAI 公式APIなら `https://api.openai.com/v1` を設定し、`/chat/completions` まで含めない。含めると SDK がさらに `/chat/completions` を付けて `.../chat/completions/chat/completions` へ送ってしまう
 - Worker Route は `api.25-ji.com/*` の全面割り当てではなく、`/health`、`/trans*`、`/mgr*` のみに限定してスキャン系パスを Worker 実行前に外す
 - OpenRouter の Chat Completions を使う場合、`provider.sort` は `latency` を指定して低遅延プロバイダーを優先する
 - `OPENROUTER_PROVIDER_ORDER` は OpenRouter の `provider.order` 用で、カンマ区切りの provider slug を指定する。空なら `order` は送らない

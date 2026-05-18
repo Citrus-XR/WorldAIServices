@@ -140,7 +140,7 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 		});
 
 		if (!result.ok) return jsonResponse({ status: 'error', result: result.publicReason }, result.statusCode);
-		return jsonResponse({ status: 'ok', result });
+		return jsonResponse({ status: 'ok', result: result.result, source: result.source, latencyMs: result.latencyMs });
 	}
 
 	if (path === '/resetcache' && request.method === 'POST') {
