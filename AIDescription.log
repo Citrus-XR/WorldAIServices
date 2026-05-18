@@ -95,3 +95,4 @@
 - 翻訳プロンプトは VRChat の短いチャット向けに調整し、ピンイン/ローマ字/混在言語/誤字/絵文字/短いスラングを想定する指示へ更新した
 - QvPen などの固有名詞、ユーザー名、ワールド名、アイテム名は原文維持とし、メッセージへの返答や説明を禁止した
 - プロンプト変更に合わせて `TRANSLATION_PROMPT_VERSION` を 3 に上げ、既存キャッシュと混ざらないようにした
+- v4 でラテン文字入力の言語判別を強化した。ja_JP / en_US / zh_CN / zh_TW / ko_KR の system prompt に「ラテン文字は先にピンインか日本語ローマ字か英語かを判別する」「逐字音訳禁止」のルールと、ピンイン特徴語 (zh/ch/sh/q/x/c 始まり、wo/ni/de/shi/hen/zhe/kan/jiu/hua/le/zai/you/hao、声調記号) および日本語ローマ字特徴語 (desu/masu/wo(を)/kawaii/sugoi/yabai、-tai/-nai/-shite) の見分け方を追記した。few-shot にピンイン入力 `a.ni kan zhe shi yi ju hua` の正例 (各言語訳) を追加。`a.ni からん ぜ し い じゅ か ？` のような逐字音訳事故を防ぐ目的。残り 9 言語 (ru/fr/de/es/pt/nl/hu/th/vi) は今回未更新 — 小言語ローカライズに自信が無いため翻訳例の汚染を避ける判断。`TRANSLATION_PROMPT_VERSION` を 4 に bump して既存キャッシュを失効させた。
