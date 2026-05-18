@@ -34,11 +34,9 @@
 		"nodejs_compat"
 	],
 	"keep_vars": true,
-	/**
-	 * Smart Placement
-	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
-	 */
-	// "placement": {  "mode": "smart" }
+	"placement": {
+		"region": "gcp:us-central1"
+	},
 	/**
 	 * Bindings
 	 * Bindings allow your Worker to interact with resources on the Cloudflare Developer Platform, including
