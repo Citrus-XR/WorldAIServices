@@ -1,8 +1,14 @@
-import { TRANSLATION_PROMPT_VERSION } from './constants';
+import { TRANSLATION_FIXED_PROMPT_VERSION, TRANSLATION_PROMPT_VERSION } from './constants';
 import { getCachedTranslation, putCachedTranslation, recordError, recordTranslationStats } from './database';
-import { requestAiTranslation } from './ai';
-import { buildCacheKey, countCharacters } from './utils';
-import { Env, ExecuteTranslationOptions, ServiceConfig, TranslationOutcome } from './types';
+import { requestAiFixedTranslation, requestAiTranslation } from './ai';
+import { buildCacheKey, buildFixedCacheKey, buildFixedLangKey, countCharacters } from './utils';
+import {
+	Env,
+	ExecuteFixedTranslationOptions,
+	ExecuteTranslationOptions,
+	ServiceConfig,
+	TranslationOutcome,
+} from './types';
 
 export async function executeTranslation(
 	env: Env,
@@ -123,6 +129,122 @@ export async function recordTranslationOutcome(env: Env, lang: string, textLengt
 		aiSuccess: translation.ok && translation.source === 'ai',
 		aiFailure: !translation.ok,
 	});
+}
+
+export async function executeFixedTranslation(
+	env: Env,
+	ctx: ExecutionContext,
+	config: ServiceConfig,
+	fromLang: string,
+	toLang: string,
+	text: string,
+	options: ExecuteFixedTranslationOptions
+): Promise<TranslationOutcome> {
+	const langLabel = buildFixedLangKey(fromLang, toLang);
+
+	if (options.useSingleFlight) {
+		return requestTranslationThroughCoordinator(env, {
+			cacheKey: await buildFixedCacheKey(fromLang, toLang, text, TRANSLATION_FIXED_PROMPT_VERSION),
+			cacheTtlSeconds: config.cacheTtlSeconds,
+			lang: langLabel,
+			fromLang,
+			toLang,
+			promptVersion: TRANSLATION_FIXED_PROMPT_VERSION,
+			requestSource: options.requestSource,
+			text,
+			useCache: options.useCache,
+			writeCache: options.writeCache,
+			action: 'translate-fixed',
+		});
+	}
+
+	const startedAt = Date.now();
+	const textLength = countCharacters(text);
+	const cacheKey = await buildFixedCacheKey(fromLang, toLang, text, TRANSLATION_FIXED_PROMPT_VERSION);
+
+	if (options.useCache) {
+		const cached = await getCachedTranslation(env, cacheKey);
+		if (cached !== null) {
+			if (options.recordStats) {
+				ctx.waitUntil(
+					recordTranslationStats(env, {
+						lang: langLabel,
+						textLength,
+						cacheHit: true,
+						cacheMiss: false,
+						aiRequest: false,
+						aiSuccess: false,
+						aiFailure: false,
+					})
+				);
+			}
+			return { ok: true, statusCode: 200, source: 'cache', latencyMs: Date.now() - startedAt, result: cached };
+		}
+	}
+
+	const aiResult = await requestAiFixedTranslation(
+		env,
+		fromLang,
+		toLang,
+		text,
+		{
+			source: options.requestSource,
+			promptVersion: TRANSLATION_FIXED_PROMPT_VERSION,
+		},
+		ctx.waitUntil.bind(ctx)
+	);
+
+	if (!aiResult.ok) {
+		if (options.recordStats) {
+			ctx.waitUntil(
+				recordTranslationStats(env, {
+					lang: langLabel,
+					textLength,
+					cacheHit: false,
+					cacheMiss: true,
+					aiRequest: true,
+					aiSuccess: false,
+					aiFailure: true,
+				})
+			);
+		}
+		ctx.waitUntil(
+			recordError(env, {
+				level: 'error',
+				code: 'AI_FIXED_REQUEST_FAILED',
+				message: '固定言語翻訳AIへのリクエストに失敗しました。',
+				details: {
+					reason: aiResult.reason,
+					publicReason: aiResult.publicReason,
+					fromLang,
+					toLang,
+					textLength,
+				},
+				occurredAt: new Date().toISOString(),
+			})
+		);
+		return aiResult as TranslationOutcome;
+	}
+
+	if (options.writeCache) {
+		await putCachedTranslation(env, cacheKey, langLabel, TRANSLATION_FIXED_PROMPT_VERSION, aiResult.result!, config.cacheTtlSeconds);
+	}
+
+	if (options.recordStats) {
+		ctx.waitUntil(
+			recordTranslationStats(env, {
+				lang: langLabel,
+				textLength,
+				cacheHit: false,
+				cacheMiss: true,
+				aiRequest: true,
+				aiSuccess: true,
+				aiFailure: false,
+			})
+		);
+	}
+
+	return aiResult as TranslationOutcome;
 }
 
 async function requestTranslationThroughCoordinator(env: Env, payload: any): Promise<TranslationOutcome> {

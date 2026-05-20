@@ -2,14 +2,14 @@ import { DurableObject } from 'cloudflare:workers';
 import { Env, TranslationCoordinatorPayload } from './types';
 import { jsonResponse } from './utils';
 import { getCachedTranslation, putCachedTranslation } from './database';
-import { requestAiTranslation } from './ai';
+import { requestAiFixedTranslation, requestAiTranslation } from './ai';
 
 export class TranslationCoordinator extends DurableObject<Env> {
 	private inFlight: Promise<any> | null = null;
 
 	async fetch(request: Request): Promise<Response> {
 		console.log(`[Coordinator] Incoming request: ${request.url}`);
-		
+
 		let payload: TranslationCoordinatorPayload;
 		try {
 			payload = await request.json();
@@ -18,7 +18,7 @@ export class TranslationCoordinator extends DurableObject<Env> {
 			return jsonResponse({ ok: false, publicReason: 'Invalid coordinator payload' }, 400);
 		}
 
-		if (payload?.action !== 'translate') {
+		if (payload?.action !== 'translate' && payload?.action !== 'translate-fixed') {
 			console.warn(`[Coordinator] Invalid action: ${payload?.action}`);
 			return jsonResponse({ ok: false, publicReason: 'Invalid coordinator action' }, 400);
 		}
@@ -54,19 +54,31 @@ export class TranslationCoordinator extends DurableObject<Env> {
 			}
 		}
 
-		console.log(`[Coordinator] Cache miss, requesting AI translation for lang=${payload.lang}`);
-		
-		// Use state.waitUntil to ensure logging doesn't block the main response
-		const aiResult = await requestAiTranslation(
-			this.env, 
-			payload.lang, 
-			payload.text, 
-			{
-				source: payload.requestSource,
-				promptVersion: payload.promptVersion,
-			},
-			this.ctx.waitUntil.bind(this.ctx)
-		);
+		console.log(`[Coordinator] Cache miss, requesting AI translation for lang=${payload.lang} action=${payload.action}`);
+
+		const aiResult =
+			payload.action === 'translate-fixed'
+				? await requestAiFixedTranslation(
+						this.env,
+						String(payload.fromLang ?? ''),
+						String(payload.toLang ?? ''),
+						payload.text,
+						{
+							source: payload.requestSource,
+							promptVersion: payload.promptVersion,
+						},
+						this.ctx.waitUntil.bind(this.ctx)
+				  )
+				: await requestAiTranslation(
+						this.env,
+						payload.lang,
+						payload.text,
+						{
+							source: payload.requestSource,
+							promptVersion: payload.promptVersion,
+						},
+						this.ctx.waitUntil.bind(this.ctx)
+				  );
 
 		if (!aiResult.ok) {
 			console.error(`[Coordinator] AI request failed: ${aiResult.reason}`);

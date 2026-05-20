@@ -1,4 +1,4 @@
-import { TRANSLATION_PROMPTS } from './constants';
+import { LOCALE_DISPLAY_NAMES, TRANSLATION_FIXED_PROMPT, TRANSLATION_PROMPTS } from './constants';
 
 export const JSON_HEADERS = {
 	'access-control-allow-origin': '*',
@@ -56,6 +56,47 @@ export async function buildCacheKey(lang: string, text: string, promptVersion: n
 	const bytes = Array.from(new Uint8Array(digest));
 	const hash = bytes.map((value) => value.toString(16).padStart(2, '0')).join('');
 	return `cache:${lang}:v${promptVersion}:${hash}`;
+}
+
+export function buildFixedTranslationMessages(fromLang: string, toLang: string, text: string) {
+	const prompt = getFixedTranslationPrompt(fromLang, toLang);
+	return [...prompt, { role: 'user', content: text }];
+}
+
+export function buildFixedTranslationPromptText(fromLang: string, toLang: string) {
+	return getFixedTranslationPrompt(fromLang, toLang)
+		.map((message) => `${message.role.toUpperCase()}: ${message.content}`)
+		.join('\n\n');
+}
+
+function getFixedTranslationPrompt(fromLang: string, toLang: string) {
+	return TRANSLATION_FIXED_PROMPT.map((message) => ({
+		role: message.role,
+		content: replaceFixedLanguagePlaceholders(message.content, fromLang, toLang),
+	}));
+}
+
+function replaceFixedLanguagePlaceholders(content: string, fromLang: string, toLang: string) {
+	const fromName = LOCALE_DISPLAY_NAMES[fromLang] ?? fromLang;
+	const toName = LOCALE_DISPLAY_NAMES[toLang] ?? toLang;
+	return String(content)
+		.split('{{FROM_LANG_NAME}}').join(fromName)
+		.split('{{TO_LANG_NAME}}').join(toName)
+		.split('{{FROM_LANG}}').join(fromLang)
+		.split('{{TO_LANG}}').join(toLang);
+}
+
+export function buildFixedLangKey(fromLang: string, toLang: string) {
+	return `${fromLang}>${toLang}`;
+}
+
+export async function buildFixedCacheKey(fromLang: string, toLang: string, text: string, promptVersion: number) {
+	const source = `fixed|${promptVersion}|${fromLang}|${toLang}|${text}`;
+	const data = new TextEncoder().encode(source);
+	const digest = await crypto.subtle.digest('SHA-256', data);
+	const bytes = Array.from(new Uint8Array(digest));
+	const hash = bytes.map((value) => value.toString(16).padStart(2, '0')).join('');
+	return `cache:fixed:${fromLang}:${toLang}:v${promptVersion}:${hash}`;
 }
 
 export function parseStoredJsonObject(json: any) {

@@ -1,11 +1,21 @@
 import OpenAI from 'openai';
 import { Env, LlmRequestEntry, TranslationOutcome } from './types';
-import { buildTranslationMessages, buildTranslationPromptText, clampInteger, countCharacters, buildPreviewText, safeMetricNumber } from './utils';
+import {
+	buildFixedLangKey,
+	buildFixedTranslationMessages,
+	buildFixedTranslationPromptText,
+	buildTranslationMessages,
+	buildTranslationPromptText,
+	clampInteger,
+	countCharacters,
+	buildPreviewText,
+	safeMetricNumber,
+} from './utils';
 import { recordLlmRequest } from './database';
 
 /**
  * Executes a translation request to the configured AI provider.
- * 
+ *
  * @param env Worker environment bindings.
  * @param lang Target language code.
  * @param text Source text to translate.
@@ -19,20 +29,61 @@ export async function requestAiTranslation(
 	metadata: any = {},
 	waitUntil?: (promise: Promise<any>) => void
 ): Promise<TranslationOutcome & { result?: string; reason?: string }> {
-	const mode = env.AI_PROVIDER_MODE === 'openai-chat' ? 'openai-chat' : 'result-json';
 	const promptText = buildTranslationPromptText(lang);
 	const messages = buildTranslationMessages(lang, text);
+	return executeAiCompletion(env, { langLabel: lang, text, promptText, messages, metadata, waitUntil });
+}
+
+/**
+ * Executes a fixed-language translation request (from → to) to the configured AI provider.
+ *
+ * @param env Worker environment bindings.
+ * @param fromLang Declared source language code.
+ * @param toLang Target language code.
+ * @param text Source text to translate.
+ * @param metadata Additional metadata for logging.
+ * @param waitUntil Optional ExecutionContext/State waitUntil to allow non-blocking logging.
+ */
+export async function requestAiFixedTranslation(
+	env: Env,
+	fromLang: string,
+	toLang: string,
+	text: string,
+	metadata: any = {},
+	waitUntil?: (promise: Promise<any>) => void
+): Promise<TranslationOutcome & { result?: string; reason?: string }> {
+	const promptText = buildFixedTranslationPromptText(fromLang, toLang);
+	const messages = buildFixedTranslationMessages(fromLang, toLang, text);
+	const langLabel = buildFixedLangKey(fromLang, toLang);
+	return executeAiCompletion(env, { langLabel, text, promptText, messages, metadata, waitUntil });
+}
+
+interface AiCompletionParams {
+	langLabel: string;
+	text: string;
+	promptText: string;
+	messages: any[];
+	metadata: any;
+	waitUntil?: (promise: Promise<any>) => void;
+}
+
+async function executeAiCompletion(
+	env: Env,
+	params: AiCompletionParams
+): Promise<TranslationOutcome & { result?: string; reason?: string }> {
+	const { langLabel, text, promptText, messages, metadata, waitUntil } = params;
+	const mode = env.AI_PROVIDER_MODE === 'openai-chat' ? 'openai-chat' : 'result-json';
 	const timeoutMs = clampInteger(Number(env.AI_TIMEOUT_MS), 1000, 60000, 10000);
 	const startedAt = Date.now();
 
 	const controller = new AbortController();
 	const timerId = setTimeout(() => {
-		console.warn(`[AI] Request timed out for lang=${lang} after ${timeoutMs}ms`);
+		console.warn(`[AI] Request timed out for lang=${langLabel} after ${timeoutMs}ms`);
 		controller.abort('timeout');
 	}, timeoutMs);
 
 	try {
-		console.log(`[AI] Starting ${mode} request for lang=${lang}, textLength=${countCharacters(text)}`);
+		console.log(`[AI] Starting ${mode} request for lang=${langLabel}, textLength=${countCharacters(text)}`);
 		let result: string;
 		if (mode === 'openai-chat') {
 			if (!env.AI_MODEL) throw new Error('AI_MODEL missing');
@@ -57,11 +108,11 @@ export async function requestAiTranslation(
 
 		const cleaned = result.trim();
 		const latencyMs = Date.now() - startedAt;
-		console.log(`[AI] Success: lang=${lang}, latency=${latencyMs}ms`);
+		console.log(`[AI] Success: lang=${langLabel}, latency=${latencyMs}ms`);
 
 		const succeeded = { ok: true, statusCode: 200, source: 'ai' as const, result: cleaned, latencyMs };
-		const logPromise = recordLlmRequest(env, buildLlmRequestEntry(metadata, mode, lang, text, succeeded));
-		
+		const logPromise = recordLlmRequest(env, buildLlmRequestEntry(metadata, mode, langLabel, text, succeeded));
+
 		if (waitUntil) {
 			waitUntil(logPromise);
 		} else {
@@ -71,11 +122,11 @@ export async function requestAiTranslation(
 		return succeeded;
 	} catch (error: any) {
 		const latencyMs = Date.now() - startedAt;
-		console.error(`[AI] Failed: lang=${lang}, error=${error instanceof Error ? error.message : String(error)}`);
+		console.error(`[AI] Failed: lang=${langLabel}, error=${error instanceof Error ? error.message : String(error)}`);
 
 		const failed = buildAiFailureResponse(error, latencyMs);
-		const logPromise = recordLlmRequest(env, buildLlmRequestEntry(metadata, mode, lang, text, failed));
-		
+		const logPromise = recordLlmRequest(env, buildLlmRequestEntry(metadata, mode, langLabel, text, failed));
+
 		if (waitUntil) {
 			waitUntil(logPromise);
 		} else {

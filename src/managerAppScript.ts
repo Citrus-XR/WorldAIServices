@@ -35,6 +35,10 @@ export const MANAGER_APP_SCRIPT = `
       simulateLangInput: document.getElementById("simulateLangInput"),
       simulateTextInput: document.getElementById("simulateTextInput"),
       simulateButton: document.getElementById("simulateButton"),
+      simulateFromLangInput: document.getElementById("simulateFromLangInput"),
+      simulateToLangInput: document.getElementById("simulateToLangInput"),
+      simulateFixedTextInput: document.getElementById("simulateFixedTextInput"),
+      simulateFixedButton: document.getElementById("simulateFixedButton"),
       simulateResultBox: document.getElementById("simulateResultBox"),
       simulateResultText: document.getElementById("simulateResultText"),
       dashboardLoadingText: document.getElementById("dashboardLoadingText"),
@@ -185,6 +189,19 @@ export const MANAGER_APP_SCRIPT = `
         method: "POST",
         body: JSON.stringify({ lang: ui.simulateLangInput.value.trim(), text: ui.simulateTextInput.value.trim() }),
         loadingMessage: "simulate を実行しています...",
+      })).data;
+      showSimulateResult(result);
+    });
+    // 固定言語 simulate 実行ボタン: fromLang/toLang を明示して /trans?f=&t=&t= と同じ経路を呼ぶ
+    ui.simulateFixedButton.addEventListener("click", async () => {
+      const result = (await callApi("/simulate-fixed", {
+        method: "POST",
+        body: JSON.stringify({
+          fromLang: ui.simulateFromLangInput.value.trim(),
+          toLang: ui.simulateToLangInput.value.trim(),
+          text: ui.simulateFixedTextInput.value.trim(),
+        }),
+        loadingMessage: "simulate (固定言語) を実行しています...",
       })).data;
       showSimulateResult(result);
     });

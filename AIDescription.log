@@ -12,7 +12,10 @@
 - `/trans` は Unity クライアント想定ヘッダーのみ受け付ける
 - 許可条件は `User-Agent` に `UnityPlayer` を含み、`Accept` が `*/*`、`X-Unity-Version` が空でないこと
 - 条件不一致時は 403 で `{ "status": "error", "result": "Unauthorized client" }`
-- クエリ最初の 1 件を採用し、key を言語コード、value を本文として扱う
+- 2 種類のクエリフォーマットを同じ `/trans` で受け付ける
+  - 自動言語検出 (旧フォーマット): `/trans?{lang}={text}` — 最初のクエリ key を言語コード、value を本文として扱う
+  - 固定言語 (新フォーマット): `/trans?f={fromLang}&t={toLang}&t={text}` — 最初の key が `f` の場合にこちらに分岐する。`t` パラメータを `getAll('t')` で取得し、1 番目を target、2 番目以降を結合した文字列を本文として扱う
+- 固定言語フォーマットで `fromLang === toLang` の場合は AI を呼ばずに入力文字列をそのまま返す
 - 本文は `trim()` 後に処理する
 - trim 後が空文字なら AI は呼ばず `{ "status": "ok", "result": "" }`
 - サービス停止時は 503 で `{ "status": "error", "result": "Server is closed" }`
@@ -36,10 +39,12 @@
   - エラー取得 `/mgr/api/errors`
   - LLM要求履歴取得 `/mgr/api/llmrequests`
   - AI疎通 `/mgr/api/ping`
-  - 疑似翻訳 `/mgr/api/simulate`
+  - 疑似翻訳 (自動検出) `/mgr/api/simulate` — body: `{ lang, text }`
+  - 疑似翻訳 (固定言語) `/mgr/api/simulate-fixed` — body: `{ fromLang, toLang, text }`。`from`/`to` でも受け付ける
   - キャッシュ全削除 `/mgr/api/resetcache`
   - サービス説明取得 `/mgr/api/docs/ai`
-- `/mgr/api/simulate` は内部の `TranslationOutcome` をそのまま返さず、外側の `result` には翻訳文字列だけを入れる。cache/ai の由来と遅延は `source` / `latencyMs` として外側に出す
+- `/mgr/api/simulate` および `/mgr/api/simulate-fixed` は内部の `TranslationOutcome` をそのまま返さず、外側の `result` には翻訳文字列だけを入れる。cache/ai の由来と遅延は `source` / `latencyMs` として外側に出す
+- simulate-fixed で `fromLang === toLang` の場合は AI を呼ばずに `{ status: ok, result: text, source: cache, latencyMs: 0 }` を返す
 
 保存方針
 - `service_config` に稼働設定を 1 行で保持する
@@ -52,9 +57,10 @@
 
 低コスト方針
 - キャッシュ優先、未ヒット時のみ AI 呼び出し
-- キャッシュキーは `TRANSLATION_PROMPT_VERSION + lang + text` を SHA-256 化する
-- 同一キー同時実行は Durable Object で single-flight 化する
-- `/mgr/api/simulate` は翻訳APIと同じキャッシュ経路を使うが統計は加算しない
+- 自動検出モードのキャッシュキーは `TRANSLATION_PROMPT_VERSION + lang + text` を SHA-256 化する (`cache:{lang}:v{version}:{hash}`)
+- 固定言語モードのキャッシュキーは `fixed|TRANSLATION_FIXED_PROMPT_VERSION|fromLang|toLang|text` を SHA-256 化する (`cache:fixed:{fromLang}:{toLang}:v{version}:{hash}`)。プロンプトが異なるため自動検出モードのキャッシュとは混ざらない
+- 同一キー同時実行は Durable Object で single-flight 化する。Coordinator の action は `translate` (自動検出) / `translate-fixed` (固定言語) の 2 種類
+- `/mgr/api/simulate*` は翻訳APIと同じキャッシュ経路を使うが統計は加算しない
 - `/mgr/api/ping` は上流AIへ実リクエストするため無料ではない
 
 統計
@@ -96,3 +102,20 @@
 - QvPen などの固有名詞、ユーザー名、ワールド名、アイテム名は原文維持とし、メッセージへの返答や説明を禁止した
 - プロンプト変更に合わせて `TRANSLATION_PROMPT_VERSION` を 3 に上げ、既存キャッシュと混ざらないようにした
 - v4 でラテン文字入力の言語判別を強化した。ja_JP / en_US / zh_CN / zh_TW / ko_KR の system prompt に「ラテン文字は先にピンインか日本語ローマ字か英語かを判別する」「逐字音訳禁止」のルールと、ピンイン特徴語 (zh/ch/sh/q/x/c 始まり、wo/ni/de/shi/hen/zhe/kan/jiu/hua/le/zai/you/hao、声調記号) および日本語ローマ字特徴語 (desu/masu/wo(を)/kawaii/sugoi/yabai、-tai/-nai/-shite) の見分け方を追記した。few-shot にピンイン入力 `a.ni kan zhe shi yi ju hua` の正例 (各言語訳) を追加。`a.ni からん ぜ し い じゅ か ？` のような逐字音訳事故を防ぐ目的。残り 9 言語 (ru/fr/de/es/pt/nl/hu/th/vi) は今回未更新 — 小言語ローカライズに自信が無いため翻訳例の汚染を避ける判断。`TRANSLATION_PROMPT_VERSION` を 4 に bump して既存キャッシュを失効させた。
+- 固定言語 API を追加した。`/trans?f={fromLang}&t={toLang}&t={text}` でクライアントが言語を明示する場合に使う。13 言語 × 13 言語ぶんの prompt を持つのは現実的でないため、`{{FROM_LANG}}` / `{{TO_LANG}}` を埋め込む汎用 system prompt 1 種類で運用する (`TRANSLATION_FIXED_PROMPT`)。バージョン管理は別系統 (`TRANSLATION_FIXED_PROMPT_VERSION`)。現在 v2。
+  - クライアントが言語を断定するため、prompt 側では「declared source を信頼し auto-detect しない、逐字音訳しない、QvPen / ユーザー名 / ワールド名等は維持、Markdown や引用符で囲まない、最終翻訳のみ出力」を強制する。
+  - 同一 `/trans` パスで自動検出と固定言語の両方を受け付ける。dispatch は最初のクエリ key が `f` かどうかで判定する。これにより既存クライアントを壊さない。
+  - 固定言語モードでは `fromLang === toLang` の場合 AI を呼ばずに `trim()` 後の text をそのまま返す (Worker / simulate-fixed 両方で同じ扱い)。prompt 側にこの分岐の記述は持たない (Worker が必ず short-circuit するため死コードになる)。
+  - キャッシュキー namespace を `cache:fixed:{from}:{to}:v{ver}:{hash}` に分離してプロンプト差異で汚染しないようにした。
+  - Durable Object Coordinator は payload に `action: 'translate' | 'translate-fixed'` を持ち、固定言語のときだけ `requestAiFixedTranslation` に分岐する。`payload.lang` は集計とログ表示用に `from>to` の文字列を入れる (`buildFixedLangKey`)。
+  - 統計の `lang` 軸は固定言語モードでは `from>to` (例: `zh_CN>en_US`) として集計される。`translation_stats.lang` の長さ制限は 32 文字あれば十分。
+  - 管理画面 simulate は 2 つに分かれている: `/mgr/api/simulate` (自動検出) と `/mgr/api/simulate-fixed` (固定言語)。固定言語側 body は `{ fromLang, toLang, text }`、後方互換のため `from`/`to` も受ける。
+- 固定言語 prompt の v2 改修 (LLM 品質対応)。`TRANSLATION_FIXED_PROMPT_VERSION` を 2 に bump して v1 のキャッシュを失効させた。
+  - **locale code を自然言語名と併記する**: prompt に `{{FROM_LANG_NAME}}` / `{{TO_LANG_NAME}}` を追加し、`utils.ts` の `LOCALE_DISPLAY_NAMES` 表 (13 言語) で `zh_CN → Simplified Chinese (Mainland China)` のように展開する。これは LLM が `zh_CN` / `zh_TW` / `pt_PT` 等のロケール記号だけだと地域差を取り違えやすいため。未登録 locale は元のコードをそのまま表示する。placeholder 置換順序は LONGER FIRST (`{{FROM_LANG_NAME}}` → `{{FROM_LANG}}`) でないと部分一致で壊れるため注意。
+  - **few-shot を style reference として system prompt 内に埋め込む**: 13×13 ペアぶんの few-shot は持てないので、`QvPen doko?` / `daijoubu? w` / `wo xi huan xiao mao` の 3 件を system prompt 末尾に「これは出力スタイル例 (専名維持、カジュアル w↔lol、ピンイン復元) の参考であり、実際の言語ペアと方向が違っても良い」と明示して埋め込む。messages 配列の user/assistant pair として持つと、モデルが「翻訳方向」を学んでしまい本番の `ja_JP→ko_KR` 等で混乱するため、あえて system 内テキストとして提示する。
+  - **逐字音訳禁止のルールを強化**: 旧 v1 は「never transliterate」の 1 行のみ。v2 では「`zh_CN`/`zh_TW` source × Latin 入力 → Pinyin として復元」「`ja_JP` source × Latin 入力 → Romaji として復元」「それ以外の source 言語 × 不一致入力 → 意味推定 (逐字音訳禁止)」の 3 ケースを明記。`wo xi huan xiao mao` = 我喜欢小猫 / `sushi wo tabetai` = 寿司が食べたい の具体例を添えた。
+  - **死コードの from === to ルールを削除**: Worker と simulate-fixed が AI 呼び出し前に短絡するので prompt 内のこのルールは 100% 命中しない。prompt を短く保つために除去。
+- 固定言語 prompt v3 と 自動検出 prompt v5 (emoji 字符除去対応)。ユーザー指示「ファイルに emoji 字符を書かない」に従い、prompt 関連ファイルから絵文字字符を全廃した。`TRANSLATION_FIXED_PROMPT_VERSION` を 3 に、`TRANSLATION_PROMPT_VERSION` を 5 に bump して両系統のキャッシュを失効させた。
+  - 固定言語 v2 の style reference にあった `太可爱了 😭` → `So cute 😭` 行を削除。代わりに「Preserve any non-letter characters from the input as-is when they fit naturally in the target language. This includes punctuation, numeric runs, symbol art, and any pictographic or non-alphabetic characters that the user typed.」という一般化規則を入れて、絵文字字符を例示せずに振る舞いを規定する。
+  - 自動検出 v4 の `TRANSLATION_PROMPTS.en_US` few-shot にあった `太可爱了 😭` / `So cute 😭` 行を削除。他 12 言語の few-shot には元から絵文字字符は無かったため変更なし。
+  - 各言語 system prompt 文中の「emoji」「絵文字」「이모지」「表情符号」「эмодзи」等の**単語**は残した。これらは「入力に絵文字字符が含まれていたら保持せよ」という指示語であり、絵文字字符そのものではない。ユーザー入力には絵文字字符が来るので、モデルが扱い方を知る必要がある。

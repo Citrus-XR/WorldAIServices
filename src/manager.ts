@@ -9,7 +9,7 @@ import {
 import { TRANSLATION_PROMPT_VERSION } from './constants';
 import { jsonResponse, clampInteger, countCharacters } from './utils';
 import { requestAiTranslation } from './ai';
-import { executeTranslation } from './translation';
+import { executeFixedTranslation, executeTranslation } from './translation';
 import { Env } from './types';
 
 const SESSION_TTL_SECONDS = 60 * 60 * 12;
@@ -143,6 +143,32 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 		return jsonResponse({ status: 'ok', result: result.result, source: result.source, latencyMs: result.latencyMs });
 	}
 
+	if (path === '/simulate-fixed' && request.method === 'POST') {
+		const config = await loadConfig(env);
+		if (!config.enabled) return jsonResponse({ status: 'error', result: 'Server is closed' }, 503);
+
+		const body = await readJsonBody(request);
+		const fromLang = String(body?.fromLang ?? body?.from ?? '').trim();
+		const toLang = String(body?.toLang ?? body?.to ?? '').trim();
+		const text = String(body?.text ?? '').trim();
+		if (!fromLang) return jsonResponse({ status: 'error', result: 'fromLang を指定してください。' }, 400);
+		if (!toLang) return jsonResponse({ status: 'error', result: 'toLang を指定してください。' }, 400);
+		if (!text) return jsonResponse({ status: 'error', result: 'text を指定してください。' }, 400);
+		if (countCharacters(text) > config.maxChars) return jsonResponse({ status: 'error', result: 'Text too long' }, 400);
+
+		if (fromLang === toLang) return jsonResponse({ status: 'ok', result: text, source: 'cache', latencyMs: 0 });
+
+		const result = await executeFixedTranslation(env, ctx, config, fromLang, toLang, text, {
+			requestSource: 'manager-simulate-fixed',
+			useCache: true,
+			writeCache: true,
+			useSingleFlight: true,
+		});
+
+		if (!result.ok) return jsonResponse({ status: 'error', result: result.publicReason }, result.statusCode);
+		return jsonResponse({ status: 'ok', result: result.result, source: result.source, latencyMs: result.latencyMs });
+	}
+
 	if (path === '/resetcache' && request.method === 'POST') {
 		ctx.waitUntil(resetTranslationCache(env, 'manager'));
 		return jsonResponse({ status: 'ok', result: 'translation_cache のレコード削除を開始しました。' });
@@ -154,10 +180,12 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 			result: {
 				title: 'AIサービス API 仕様',
 				body: [
-					'公開翻訳 API: GET /trans?{lang}={text}',
+					'公開翻訳 API (自動言語検出): GET /trans?{lang}={text}',
+					'公開翻訳 API (固定言語): GET /trans?f={fromLang}&t={toLang}&t={text}',
 					'許可ヘッダー: UnityPlayer + Accept */* + X-Unity-Version',
 					'レスポンス形式: { status, result }',
 					'サーバー停止時: 503 + Server is closed',
+					'固定言語モードで from と to が同じ場合は AI を呼ばずに入力を返す',
 					'非AIサービスはローカル WorldService 側へ移管済み',
 				],
 			},

@@ -1,4 +1,30 @@
-export const TRANSLATION_PROMPT_VERSION = 4;
+export const TRANSLATION_PROMPT_VERSION = 5;
+export const TRANSLATION_FIXED_PROMPT_VERSION = 3;
+
+export const LOCALE_DISPLAY_NAMES: Record<string, string> = Object.freeze({
+	en_US: 'English (US)',
+	ja_JP: 'Japanese',
+	ko_KR: 'Korean',
+	zh_CN: 'Simplified Chinese (Mainland China)',
+	zh_TW: 'Traditional Chinese (Taiwan)',
+	ru_RU: 'Russian',
+	th_TH: 'Thai',
+	fr_FR: 'French',
+	nl_NL: 'Dutch',
+	es_ES: 'Spanish (Spain)',
+	hu_HU: 'Hungarian',
+	de_DE: 'German',
+	pt_PT: 'Portuguese (Portugal)',
+	vi_VN: 'Vietnamese',
+});
+
+export const TRANSLATION_FIXED_PROMPT: { role: string; content: string }[] = Object.freeze([
+	{
+		role: 'system',
+		content:
+			'You are a professional translator for short VRChat chat messages. Translate the user text from {{FROM_LANG_NAME}} (locale `{{FROM_LANG}}`) into natural, casual {{TO_LANG_NAME}} (locale `{{TO_LANG}}`).\n\nImportant rules:\n- The source language is declared as {{FROM_LANG_NAME}}. Trust this declaration and do not waste effort trying to redetect it.\n- Never produce a character-by-character phonetic rewrite (transliteration). The output must carry the actual meaning, not the sound of the source.\n- If the declared source is Simplified Chinese or Traditional Chinese (`zh_CN`/`zh_TW`) but the user text is written in Latin letters only, treat it as Pinyin (e.g. `wo xi huan xiao mao` = 我喜欢小猫). Recover the Chinese meaning before translating into {{TO_LANG_NAME}}.\n- If the declared source is Japanese (`ja_JP`) but the user text is written in Latin letters only, treat it as Romaji (e.g. `sushi wo tabetai` = 寿司が食べたい). Recover the Japanese meaning before translating into {{TO_LANG_NAME}}.\n- For any other source language, if the input does not look like that language at all, infer the most reasonable meaning rather than transliterating the letters one by one.\n- Preserve unknown terms, usernames, world names, item names, and product names such as QvPen exactly as written.\n- Preserve any non-letter characters from the input as-is when they fit naturally in the target language. This includes punctuation, numeric runs, symbol art, and any pictographic or non-alphabetic characters that the user typed.\n- Keep the original tone and brevity. Casual chat slang (`w`, `lol`, `ㅋㅋ`, `哈哈`, `555`) should map to the closest equivalent in {{TO_LANG_NAME}}.\n- Do not wrap the output in quotes or Markdown. Do not add information, explain corrections, or answer the message.\n\nStyle reference (these examples show the desired output style; the language pairs in the examples may differ from your actual job — do not copy their direction, only the style):\n- input `QvPen doko?` (ja-romaji→ja) becomes `QvPenどこ？` — product name preserved exactly\n- input `daijoubu? w` (ja-romaji→en) becomes `Are you okay? lol` — casual slang `w` mapped to `lol`\n- input `wo xi huan xiao mao` (zh-pinyin→en) becomes `I like kittens` — pinyin recovered, not transliterated\n\nOutput only the final translation in {{TO_LANG_NAME}}.',
+	},
+]) as any;
 
 export const TRANSLATION_PROMPTS: Record<string, any[]> = Object.freeze({
 	en_US: [
@@ -13,8 +39,6 @@ export const TRANSLATION_PROMPTS: Record<string, any[]> = Object.freeze({
 		{ role: 'assistant', content: 'Ah look, this is just one sentence' },
 		{ role: 'user', content: 'sushi wo tabetai' },
 		{ role: 'assistant', content: 'I want to eat sushi' },
-		{ role: 'user', content: '太可爱了 😭' },
-		{ role: 'assistant', content: 'So cute 😭' },
 		{ role: 'user', content: 'QvPen doko?' },
 		{ role: 'assistant', content: 'Where is QvPen?' },
 		{ role: 'user', content: 'daijoubu? w' },

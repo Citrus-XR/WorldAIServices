@@ -54,7 +54,15 @@ export function buildAiToolsPanel() {
       <input id="simulateLangInput" placeholder="言語コード (例: ja_JP)" class="field-input" />
       <input id="simulateTextInput" placeholder="翻訳対象テキスト" class="field-input span-2" />
     </div>
-    <div class="button-row"><button id="simulateButton" class="btn btn-primary">simulate 実行</button></div>
+    <div class="button-row"><button id="simulateButton" class="btn btn-primary">simulate 実行 (自動検出)</button></div>
+    <hr class="border-[color:var(--mgr-border)]" />
+    <p class="text-xs text-[color:var(--mgr-muted)]">固定言語 simulate: GET /trans?f={fromLang}&amp;t={toLang}&amp;t={text} と同じ経路</p>
+    <div class="field-grid">
+      <input id="simulateFromLangInput" placeholder="from 言語コード (例: zh_CN)" class="field-input" />
+      <input id="simulateToLangInput" placeholder="to 言語コード (例: en_US)" class="field-input" />
+      <input id="simulateFixedTextInput" placeholder="翻訳対象テキスト" class="field-input span-2" />
+    </div>
+    <div class="button-row"><button id="simulateFixedButton" class="btn btn-primary">simulate 実行 (固定言語)</button></div>
     <div id="simulateResultBox" class="hidden surface space-y-2">
       <p class="text-sm font-semibold">simulate 結果</p>
       <pre id="simulateResultText" class="text-xs whitespace-pre-wrap break-all text-[color:var(--mgr-text)]"></pre>

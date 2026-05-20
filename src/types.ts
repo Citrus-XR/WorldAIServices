@@ -29,11 +29,13 @@ export interface TranslationMetric {
 }
 
 export interface TranslationCoordinatorPayload {
-	action: 'translate';
+	action: 'translate' | 'translate-fixed';
 	useCache: boolean;
 	writeCache: boolean;
 	cacheKey: string;
 	lang: string;
+	fromLang?: string;
+	toLang?: string;
 	text: string;
 	requestSource: string;
 	promptVersion: number;
@@ -51,6 +53,14 @@ export interface TranslationOutcome {
 }
 
 export interface ExecuteTranslationOptions {
+	requestSource: string;
+	useCache: boolean;
+	writeCache: boolean;
+	useSingleFlight: boolean;
+	recordStats?: boolean;
+}
+
+export interface ExecuteFixedTranslationOptions {
 	requestSource: string;
 	useCache: boolean;
 	writeCache: boolean;
